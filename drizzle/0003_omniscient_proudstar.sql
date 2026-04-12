@@ -1,0 +1,1 @@
+ALTER TABLE `pricing_data` MODIFY COLUMN `platform` enum('ebay','amazon','facebook','ebaymotors','rockauto','carpart','lkq') NOT NULL;
