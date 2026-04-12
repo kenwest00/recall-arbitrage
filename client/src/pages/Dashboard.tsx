@@ -88,7 +88,7 @@ export default function Dashboard() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [agency, setAgency] = useState<string>("ALL");
-  const [onlyRefund, setOnlyRefund] = useState(false);
+  const [onlyRefund, setOnlyRefund] = useState(true); // Default: show refund-only recalls
   const [onlyOpps, setOnlyOpps] = useState(false);
   const [threshold] = useState(10);
 
@@ -139,8 +139,9 @@ export default function Dashboard() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            title="Total Recalls Tracked"
+            title="Refund-Eligible Recalls"
             value={stats.data?.totalRecalls ?? null}
+            sub="Cash refund available"
             icon={AlertTriangle}
           />
           <StatCard
@@ -157,9 +158,9 @@ export default function Dashboard() {
             accent="text-yellow-400"
           />
           <StatCard
-            title="With Refund Value"
-            value={stats.data?.withRefundValue ?? null}
-            sub="Extracted from notice"
+            title="Last Sync"
+            value={stats.data?.lastSyncAt ? new Date(stats.data.lastSyncAt).toLocaleDateString() : "Never"}
+            sub={stats.data?.lastSyncAt ? new Date(stats.data.lastSyncAt).toLocaleTimeString() : "Run a sync to load data"}
             icon={Package}
           />
         </div>
@@ -194,7 +195,7 @@ export default function Dashboard() {
                 onClick={() => setOnlyRefund(!onlyRefund)}
               >
                 <Filter className="w-3 h-3 mr-1.5" />
-                Has Refund
+                {onlyRefund ? "Refund-Only ✓" : "All Remedies"}
               </Button>
               <Button
                 size="sm"
@@ -243,7 +244,7 @@ export default function Dashboard() {
               <div className="p-12 text-center">
                 <AlertTriangle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">
-                  No recalls found.{" "}
+                  No refund-eligible recalls found.{" "}
                   {!recalls.isLoading && (
                     <button
                       className="text-primary underline"
@@ -252,7 +253,7 @@ export default function Dashboard() {
                       Trigger a sync
                     </button>
                   )}{" "}
-                  to load data.
+                  to load data, or toggle to "All Remedies" to see non-refund recalls.
                 </p>
               </div>
             ) : (

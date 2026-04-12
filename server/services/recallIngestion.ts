@@ -29,9 +29,10 @@ function mapCpscRecall(r: CpscRecall): InsertRecall {
     .filter(Boolean)
     .join("\n\n");
 
+  // isRefundRemedy now accepts the full remedy text string
   const hasRefund = isRefundRemedy(r.Remedies || []);
   const { value: refundValue, notes: refundNotes } = hasRefund
-    ? extractRefundValue(rawNotice)
+    ? extractRefundValue(remedy)
     : { value: null, notes: "" };
 
   return {
@@ -46,7 +47,7 @@ function mapCpscRecall(r: CpscRecall): InsertRecall {
     remedy,
     rawNotice,
     refundValue: refundValue !== null ? String(refundValue) : null,
-    refundExtracted: refundValue !== null,
+    refundExtracted: hasRefund,
     refundNotes: refundNotes || null,
     recallDate: r.RecallDate ? new Date(r.RecallDate) : null,
     recallUrl: r.URL || null,

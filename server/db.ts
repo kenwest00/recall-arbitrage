@@ -269,8 +269,8 @@ export async function getDashboardStats(thresholdPercent = 10) {
     .from(recalls)
     .where(eq(recalls.isActive, true));
 
-  const totalRecallCount = allRecalls.length;
-  const withRefundCount = allRecalls.filter((r) => r.refundExtracted).length;
+  const totalRecallCount = allRecalls.filter((r) => r.refundExtracted).length; // Only count refund-eligible recalls
+  const withRefundCount = totalRecallCount; // All tracked recalls are refund-eligible
 
   // Profit analysis (may be empty if pricing hasn't been fetched yet)
   const allAnalysis = await db.select().from(profitAnalysis);

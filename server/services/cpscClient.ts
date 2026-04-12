@@ -53,19 +53,60 @@ const CPSC_BASE = "https://www.saferproducts.gov/RestWebServices/Recall";
  */
 
 /**
+ * Determine if a recall remedy is a CASH REFUND (not exchange/replacement/repair).
+ *
+ * Rules:
+ * - MUST contain a refund/reimburse/money-back keyword
+ * - "store credit" alone does NOT qualify — only cash/purchase price refund
+ * - If the remedy mentions BOTH refund AND replacement, it qualifies (consumer has refund option)
+ * - Replacement-only, repair-only, or free-fix-only remedies are excluded
+ */
+export function isRefundRemedy(remedies: CpscRecallRemedy[]): boolean {
+  const fullText = remedies.map((r) => r.Name).join(" ");
+
+  // Must contain an explicit refund/reimburse/money-back signal
+  const hasRefundSignal = /\bfull\s+refund\b|\brefund\b|\breimburse\b|\bmoney\s+back\b|\bcash\s+back\b|\bpurchase\s+price\b/i.test(fullText);
+  if (!hasRefundSignal) return false;
+
+  // Exclude if the ONLY remedy is store credit (no cash option)
+  const hasStoreCreditOnly =
+    /\bstore\s+credit\b/i.test(fullText) &&
+    !/\bfull\s+refund\b|\bcash\s+refund\b|\bpurchase\s+price\b|\breimburse\b/i.test(fullText);
+  if (hasStoreCreditOnly) return false;
+
+  return true;
+}
+
+/**
+ * Classify the remedy type for display purposes.
+ */
+export function classifyRemedy(remedyText: string): "refund" | "replacement" | "repair" | "other" {
+  const t = remedyText.toLowerCase();
+  const hasRefund = /\bfull\s+refund\b|\brefund\b|\breimburse\b|\bmoney\s+back\b|\bpurchase\s+price\b/.test(t);
+  const hasReplacement = /\breplacement\b|\breplace\b|\bexchange\b/.test(t);
+  const hasRepair = /\brepair\b|\bfix\b|\bservice\b/.test(t);
+
+  if (hasRefund) return "refund";
+  if (hasReplacement) return "replacement";
+  if (hasRepair) return "repair";
+  return "other";
+}
+
+/**
  * Extract refund value from CPSC remedy/description text.
  * Looks for patterns like "$25", "full purchase price", "refund of $X", etc.
+ * Only call this AFTER confirming isRefundRemedy() is true.
  */
 export function extractRefundValue(text: string): { value: number | null; notes: string } {
   if (!text) return { value: null, notes: "" };
 
   // Match explicit dollar amounts near refund keywords
   const refundPatterns = [
-    /refund[^.]*?\$\s*([\d,]+(?:\.\d{1,2})?)/i,
-    /\$\s*([\d,]+(?:\.\d{1,2})?)[^.]*?refund/i,
-    /full\s+(?:purchase\s+)?(?:price|refund)/i,
-    /reimburse[^.]*?\$\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /refund[^.]{0,60}?\$\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /\$\s*([\d,]+(?:\.\d{1,2})?)[^.]{0,60}?refund/i,
+    /reimburse[^.]{0,60}?\$\s*([\d,]+(?:\.\d{1,2})?)/i,
     /\$\s*([\d,]+(?:\.\d{1,2})?)\s*(?:cash\s+)?refund/i,
+    /full\s+(?:purchase\s+)?(?:price|refund)/i,
   ];
 
   for (const pattern of refundPatterns) {
@@ -75,21 +116,13 @@ export function extractRefundValue(text: string): { value: number | null; notes:
         const value = parseFloat(match[1].replace(/,/g, ""));
         return { value, notes: `Extracted from notice: "${match[0].trim()}"` };
       }
-      // "full purchase price" — no specific dollar amount
-      return { value: null, notes: `Full purchase price refund indicated: "${match[0].trim()}"` };
+      // "full purchase price" — no specific dollar amount in notice
+      return { value: null, notes: `Full purchase price refund: "${match[0].trim()}"` };
     }
   }
 
-  return { value: null, notes: "" };
-}
-
-/**
- * Determine if a recall remedy includes a refund.
- */
-export function isRefundRemedy(remedies: CpscRecallRemedy[]): boolean {
-  return remedies.some((r) =>
-    /refund|reimburse|money back|cash back/i.test(r.Name)
-  );
+  // Has refund signal but no extractable dollar amount
+  return { value: null, notes: "Refund indicated in notice (amount not specified)" };
 }
 
 /**

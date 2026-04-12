@@ -89,6 +89,7 @@ const analysisRouter = router({
     .query(async ({ input }) => {
       return listRecalls({
         onlyOpportunities: true,
+        onlyWithRefund: true, // Opportunities are always refund-only
         profitThreshold: input.profitThreshold,
         agency: input.agency,
         limit: input.limit,
