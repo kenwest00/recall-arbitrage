@@ -1,8 +1,13 @@
 /**
  * Market Pricing Service
- * Fetches used market prices from eBay, Amazon, and Facebook Marketplace
- * for recalled products. Uses web scraping since most APIs require paid access.
+ * Fetches used market prices from eBay (official API), Amazon, and Facebook Marketplace
+ * for recalled CPSC consumer products.
+ *
+ * eBay now uses the official Finding API + Browse API via ebayApiClient.ts.
+ * Amazon and Facebook Marketplace use best-effort HTML parsing (no paid API required).
  */
+
+import { fetchEbayPrices as fetchEbayApiPrices } from "./ebayApiClient";
 
 export interface PricingResult {
   platform: "ebay" | "amazon" | "facebook";
@@ -16,90 +21,40 @@ export interface PricingResult {
   avgPrice: number | null;
   count: number;
   error?: string;
+  /** true when results come from eBay Sandbox (simulated data) */
+  isSandbox?: boolean;
 }
 
-// ─── eBay Scraping ────────────────────────────────────────────────────────────
+// ─── eBay — Official API ──────────────────────────────────────────────────────
 
 /**
- * Fetch eBay sold/completed listings for a product query.
- * Uses eBay's public search with LH_Complete=1&LH_Sold=1 filters.
+ * Fetch eBay sold/completed listings using the official Finding API.
+ * Falls back gracefully if credentials are missing.
  */
 export async function fetchEbayPrices(query: string): Promise<PricingResult> {
-  const searchQuery = encodeURIComponent(`${query} used`);
-  // Search sold listings for accurate market pricing
-  const url = `https://www.ebay.com/sch/i.html?_nkw=${searchQuery}&LH_Complete=1&LH_Sold=1&_sop=13&LH_ItemCondition=3000`;
-
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const result = await fetchEbayApiPrices(query, false);
 
-    if (!res.ok) {
-      return { platform: "ebay", listings: [], avgPrice: null, count: 0, error: `HTTP ${res.status}` };
-    }
+    // Prefer sold listings for pricing; fall back to active
+    const source = result.sold.listings.length > 0 ? result.sold : result.active;
 
-    const html = await res.text();
-    const listings = parseEbayListings(html, query);
-
-    const prices = listings.map((l) => l.price).filter((p) => p > 0);
-    const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-
-    return { platform: "ebay", listings, avgPrice, count: listings.length };
+    return {
+      platform: "ebay",
+      listings: source.listings.map((l) => ({
+        title: l.title,
+        price: l.price,
+        condition: l.condition,
+        url: l.listingUrl,
+        quantity: l.quantity,
+      })),
+      avgPrice: result.blendedAvg,
+      count: source.listings.length,
+      isSandbox: result.isSandbox,
+      error: source.error,
+    };
   } catch (err) {
     return { platform: "ebay", listings: [], avgPrice: null, count: 0, error: String(err) };
   }
-}
-
-function parseEbayListings(html: string, query: string): PricingResult["listings"] {
-  const listings: PricingResult["listings"] = [];
-
-  // Extract price patterns from eBay HTML
-  // Match sold price patterns: $XX.XX
-  const pricePattern = /\$\s*([\d,]+\.?\d*)/g;
-  const titlePattern = /<h3[^>]*class="[^"]*s-item__title[^"]*"[^>]*>(.*?)<\/h3>/gi;
-  const urlPattern = /href="(https:\/\/www\.ebay\.com\/itm\/[^"]+)"/g;
-
-  const prices: number[] = [];
-  const titles: string[] = [];
-  const urls: string[] = [];
-
-  let match;
-  while ((match = pricePattern.exec(html)) !== null && prices.length < 20) {
-    const price = parseFloat(match[1].replace(/,/g, ""));
-    if (price > 0.5 && price < 50000) {
-      prices.push(price);
-    }
-  }
-
-  while ((match = titlePattern.exec(html)) !== null && titles.length < 20) {
-    const title = match[1].replace(/<[^>]+>/g, "").trim();
-    if (title && title !== "Shop on eBay") {
-      titles.push(title);
-    }
-  }
-
-  while ((match = urlPattern.exec(html)) !== null && urls.length < 20) {
-    urls.push(match[1].split("?")[0]);
-  }
-
-  const count = Math.min(prices.length, 10);
-  for (let i = 0; i < count; i++) {
-    listings.push({
-      title: titles[i] || `${query} - Used`,
-      price: prices[i],
-      condition: "Used",
-      url: urls[i] || `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}`,
-      quantity: 1,
-    });
-  }
-
-  return listings;
 }
 
 // ─── Amazon Scraping ──────────────────────────────────────────────────────────
@@ -115,7 +70,6 @@ export async function fetchAmazonPrices(query: string): Promise<PricingResult> {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
       },
       signal: AbortSignal.timeout(15_000),
     });
@@ -138,8 +92,6 @@ export async function fetchAmazonPrices(query: string): Promise<PricingResult> {
 
 function parseAmazonListings(html: string, query: string): PricingResult["listings"] {
   const listings: PricingResult["listings"] = [];
-
-  // Extract prices from Amazon search results
   const pricePattern = /\$\s*([\d,]+\.?\d*)/g;
   const asinPattern = /\/dp\/([A-Z0-9]{10})/g;
 
@@ -149,15 +101,11 @@ function parseAmazonListings(html: string, query: string): PricingResult["listin
   let match;
   while ((match = pricePattern.exec(html)) !== null && prices.length < 15) {
     const price = parseFloat(match[1].replace(/,/g, ""));
-    if (price > 0.5 && price < 50000) {
-      prices.push(price);
-    }
+    if (price > 0.5 && price < 50000) prices.push(price);
   }
 
   while ((match = asinPattern.exec(html)) !== null && asins.length < 15) {
-    if (!asins.includes(match[1])) {
-      asins.push(match[1]);
-    }
+    if (!asins.includes(match[1])) asins.push(match[1]);
   }
 
   const count = Math.min(prices.length, 8);
@@ -179,8 +127,6 @@ function parseAmazonListings(html: string, query: string): PricingResult["listin
 // ─── Facebook Marketplace ─────────────────────────────────────────────────────
 
 export async function fetchFacebookPrices(query: string): Promise<PricingResult> {
-  // Facebook Marketplace requires JS rendering and login for full access.
-  // We use a public search URL that returns some data without login.
   const searchQuery = encodeURIComponent(query);
   const url = `https://www.facebook.com/marketplace/search/?query=${searchQuery}&exact=false`;
 
@@ -213,8 +159,6 @@ export async function fetchFacebookPrices(query: string): Promise<PricingResult>
 
 function parseFacebookListings(html: string, query: string): PricingResult["listings"] {
   const listings: PricingResult["listings"] = [];
-
-  // Facebook embeds JSON data in __bbox and __data patterns
   const pricePattern = /"listing_price":\{"amount":"([\d.]+)"/g;
   const titlePattern = /"name":"([^"]{5,100})"/g;
   const idPattern = /"id":"(\d{15,20})"/g;
@@ -267,21 +211,15 @@ export interface MsrpResult {
 export async function fetchMsrpPrice(query: string): Promise<MsrpResult[]> {
   const results: MsrpResult[] = [];
 
-  // Try Google Shopping via a public search
   try {
     const googleResult = await fetchGoogleShoppingPrice(query);
     if (googleResult) results.push(googleResult);
-  } catch {
-    // continue
-  }
+  } catch { /* continue */ }
 
-  // Try Amazon current listing price
   try {
     const amazonResult = await fetchAmazonCurrentPrice(query);
     if (amazonResult) results.push(amazonResult);
-  } catch {
-    // continue
-  }
+  } catch { /* continue */ }
 
   return results;
 }
@@ -302,7 +240,6 @@ async function fetchGoogleShoppingPrice(query: string): Promise<MsrpResult | nul
   if (!res.ok) return null;
   const html = await res.text();
 
-  // Extract first price from Google Shopping results
   const priceMatch = html.match(/\$\s*([\d,]+\.?\d*)/);
   if (!priceMatch) return null;
 
@@ -318,7 +255,7 @@ async function fetchGoogleShoppingPrice(query: string): Promise<MsrpResult | nul
 }
 
 async function fetchAmazonCurrentPrice(query: string): Promise<MsrpResult | null> {
-  const searchQuery = encodeURIComponent(`${query}`);
+  const searchQuery = encodeURIComponent(query);
   const url = `https://www.amazon.com/s?k=${searchQuery}&rh=p_n_condition-type%3A1294423011`;
 
   const res = await fetch(url, {

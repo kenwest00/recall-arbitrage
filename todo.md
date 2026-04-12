@@ -91,3 +91,14 @@
 - [x] Smart platform routing: NHTSA recalls → auto parts sources; CPSC recalls → general market sources
 - [x] UI: show auto parts platform breakdown separately from general market platforms
 - [x] UI: label platforms clearly (eBay Motors vs eBay general, etc.)
+
+## eBay API Integration (Official Credentials)
+- [x] eBay credentials set (EBAY_APP_ID, EBAY_CERT_ID, EBAY_DEV_ID)
+- [x] Validate credentials via eBay OAuth2 client credentials token endpoint
+- [x] Build eBay API client: OAuth2 token fetch + auto-refresh
+- [x] Finding API: findCompletedItems (sold listings) for general eBay (CPSC)
+- [x] Finding API: findCompletedItems with categoryId=6030 for eBay Motors (NHTSA)
+- [x] Browse API: search for current active listings (quantity available)
+- [x] Replace HTML scraping in marketPricing.ts with official API calls
+- [x] Replace HTML scraping in autoPartsPricing.ts with official API calls
+- [x] Update vitest to validate eBay API client with credential check

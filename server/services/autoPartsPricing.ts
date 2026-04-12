@@ -4,11 +4,13 @@
  * Used specifically for NHTSA vehicle/component recalls.
  *
  * Platforms:
- *   - eBay Motors (completed/sold listings for auto parts)
- *   - RockAuto (new/remanufactured pricing — useful as MSRP baseline)
- *   - Car-Part.com (salvage yard / used OEM parts)
- *   - LKQ Corporation / Pick-n-Pull (used OEM parts network)
+ *   - eBay Motors (official Finding API + Browse API via ebayApiClient.ts)
+ *   - RockAuto (new/remanufactured pricing — useful as MSRP baseline, HTML)
+ *   - Car-Part.com (salvage yard / used OEM parts, HTML)
+ *   - LKQ Corporation / Pick-n-Pull (used OEM parts network, HTML)
  */
+
+import { fetchEbayPrices as fetchEbayApiPrices } from "./ebayApiClient";
 
 export type AutoPartsPlatform = "ebaymotors" | "rockauto" | "carpart" | "lkq";
 
@@ -53,66 +55,38 @@ function avgPrices(listings: AutoPartsListing[]): number | null {
   return prices.reduce((a, b) => a + b, 0) / prices.length;
 }
 
-// ─── eBay Motors ──────────────────────────────────────────────────────────────
+// ─── eBay Motors — Official API ───────────────────────────────────────────────
 
 /**
  * Search eBay Motors completed/sold listings for auto parts.
- * Category 6030 = Auto Parts & Accessories on eBay.
+ * Uses the official eBay Finding API with category 6030 (Auto Parts & Accessories).
  */
 export async function fetchEbayMotorsPrices(query: string): Promise<AutoPartsPricingResult> {
-  const q = encodeURIComponent(query);
-  // LH_Complete=1&LH_Sold=1 = completed sold listings; sacat=6030 = Auto Parts
-  const url = `https://www.ebay.com/sch/i.html?_nkw=${q}&sacat=6030&LH_Complete=1&LH_Sold=1&_sop=13`;
-
   try {
-    const html = await fetchHtml(url);
-    const listings = parseEbayMotorsHtml(html, query);
+    const result = await fetchEbayApiPrices(query, true); // true = auto parts (eBay Motors)
+
+    // Prefer sold listings for pricing accuracy
+    const source = result.sold.listings.length > 0 ? result.sold : result.active;
+
+    const listings: AutoPartsListing[] = source.listings.map((l) => ({
+      title: l.title,
+      price: l.price,
+      condition: l.condition,
+      url: l.listingUrl,
+      quantity: l.quantity,
+      location: l.location,
+    }));
+
     return {
       platform: "ebaymotors",
       listings,
-      avgPrice: avgPrices(listings),
+      avgPrice: result.blendedAvg,
       count: listings.length,
+      error: source.error,
     };
   } catch (err) {
     return { platform: "ebaymotors", listings: [], avgPrice: null, count: 0, error: String(err) };
   }
-}
-
-function parseEbayMotorsHtml(html: string, query: string): AutoPartsListing[] {
-  const listings: AutoPartsListing[] = [];
-
-  // Extract sold prices
-  const priceRe = /\$\s*([\d,]+\.?\d*)/g;
-  const titleRe = /<h3[^>]*class="[^"]*s-item__title[^"]*"[^>]*>(.*?)<\/h3>/gi;
-  const urlRe = /href="(https:\/\/www\.ebay\.com\/itm\/[^"?]+)/g;
-
-  const prices: number[] = [];
-  const titles: string[] = [];
-  const urls: string[] = [];
-
-  let m;
-  while ((m = priceRe.exec(html)) !== null && prices.length < 20) {
-    const p = parseFloat(m[1].replace(/,/g, ""));
-    if (p > 1 && p < 100_000) prices.push(p);
-  }
-  while ((m = titleRe.exec(html)) !== null && titles.length < 20) {
-    const t = m[1].replace(/<[^>]+>/g, "").trim();
-    if (t && t !== "Shop on eBay") titles.push(t);
-  }
-  while ((m = urlRe.exec(html)) !== null && urls.length < 20) {
-    urls.push(m[1]);
-  }
-
-  for (let i = 0; i < Math.min(prices.length, 10); i++) {
-    listings.push({
-      title: titles[i] || `${query} (eBay Motors)`,
-      price: prices[i],
-      condition: "Used",
-      url: urls[i] || `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&sacat=6030`,
-      quantity: 1,
-    });
-  }
-  return listings;
 }
 
 // ─── RockAuto ─────────────────────────────────────────────────────────────────
