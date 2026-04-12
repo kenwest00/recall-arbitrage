@@ -260,11 +260,19 @@ export async function getDashboardStats(thresholdPercent = 10) {
   const db = await getDb();
   if (!db) return null;
 
-  const [totalRecalls] = await db
-    .select({ count: recalls.id })
+  // Count total active recalls directly from the recalls table
+  const allRecalls = await db
+    .select({
+      id: recalls.id,
+      refundExtracted: recalls.refundExtracted,
+    })
     .from(recalls)
     .where(eq(recalls.isActive, true));
 
+  const totalRecallCount = allRecalls.length;
+  const withRefundCount = allRecalls.filter((r) => r.refundExtracted).length;
+
+  // Profit analysis (may be empty if pricing hasn't been fetched yet)
   const allAnalysis = await db.select().from(profitAnalysis);
 
   const opportunities = allAnalysis.filter((a) => {
@@ -281,10 +289,10 @@ export async function getDashboardStats(thresholdPercent = 10) {
   const lastSync = await getLastSuccessfulSync();
 
   return {
-    totalRecalls: allAnalysis.length > 0 ? allAnalysis.length : 0,
+    totalRecalls: totalRecallCount,
     opportunitiesFound: opportunities.length,
     avgMargin: avgMargin ? parseFloat(avgMargin.toFixed(1)) : null,
     lastSyncAt: lastSync?.completedAt || null,
-    withRefundValue: allAnalysis.filter((a) => a.refundValue !== null).length,
+    withRefundValue: withRefundCount,
   };
 }

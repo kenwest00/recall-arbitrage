@@ -102,3 +102,10 @@
 - [x] Replace HTML scraping in marketPricing.ts with official API calls
 - [x] Replace HTML scraping in autoPartsPricing.ts with official API calls
 - [x] Update vitest to validate eBay API client with credential check
+
+## Bug Fix: Recall Data Not Appearing
+- [x] Diagnose CPSC API response format and ingestion code
+- [x] Diagnose NHTSA API response format and ingestion code
+- [x] Fix database insert logic for recalls table
+- [x] Fix sync trigger to actually persist data
+- [x] Verify recalls appear in dashboard after sync

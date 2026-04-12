@@ -46,7 +46,11 @@ export interface CpscRecall {
 }
 
 const CPSC_BASE = "https://www.saferproducts.gov/RestWebServices/Recall";
-const PAGE_SIZE = 100;
+
+/**
+ * NOTE: The CPSC API ignores limit/offset parameters and returns ALL matching records
+ * in a single response. We fetch once with a wide date range.
+ */
 
 /**
  * Extract refund value from CPSC remedy/description text.
@@ -89,18 +93,17 @@ export function isRefundRemedy(remedies: CpscRecallRemedy[]): boolean {
 }
 
 /**
- * Fetch a page of CPSC recalls.
+ * Fetch all CPSC recalls in a single API call.
+ * The CPSC API ignores limit/offset and returns all matching records at once.
  */
-async function fetchCpscPage(startIndex: number): Promise<CpscRecall[]> {
+export async function fetchAllCpscRecalls(): Promise<CpscRecall[]> {
   const url = new URL(CPSC_BASE);
   url.searchParams.set("format", "json");
   url.searchParams.set("RecallDateStart", "2020-01-01");
-  url.searchParams.set("limit", String(PAGE_SIZE));
-  url.searchParams.set("offset", String(startIndex));
 
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!res.ok) {
@@ -108,25 +111,7 @@ async function fetchCpscPage(startIndex: number): Promise<CpscRecall[]> {
   }
 
   const data = await res.json();
-  return Array.isArray(data) ? data : [];
-}
-
-/**
- * Fetch all CPSC recalls (paginated).
- */
-export async function fetchAllCpscRecalls(): Promise<CpscRecall[]> {
-  const all: CpscRecall[] = [];
-  let offset = 0;
-
-  while (true) {
-    const page = await fetchCpscPage(offset);
-    if (page.length === 0) break;
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
-    // Throttle to avoid rate limiting
-    await new Promise((r) => setTimeout(r, 300));
-  }
-
-  return all;
+  const records = Array.isArray(data) ? data : [];
+  console.log(`[CPSC] Fetched ${records.length} recalls from API`);
+  return records;
 }
