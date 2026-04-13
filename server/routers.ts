@@ -190,7 +190,7 @@ const syncRouter = router({
       return getRecentSyncLogs(input.limit);
     }),
 
-  triggerSync: protectedProcedure
+  triggerSync: publicProcedure
     .input(z.object({ agency: z.enum(["CPSC", "NHTSA", "ALL"]).default("ALL") }))
     .mutation(async ({ input }) => {
       if (input.agency === "CPSC") {
