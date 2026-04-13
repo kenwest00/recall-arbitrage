@@ -252,20 +252,58 @@ export async function calculateProfitForRecall(
 }
 
 /**
- * Refresh pricing and profit analysis for all active recalls.
+ * Build a specific, manufacturer-qualified search query for market pricing lookups.
+ * Prefers: "<Manufacturer> <ProductName>" (e.g. "Shenzhen Shijingjie Male-to-Male Extension Cords")
+ * Falls back to productName alone, then title alone.
+ * Strips boilerplate recall language from titles and caps at 80 chars for eBay compatibility.
  */
+function buildSearchQuery(recall: {
+  productName: string | null;
+  title: string | null;
+  manufacturer: string | null;
+}): string {
+  const product = (recall.productName || "").trim();
+  const manufacturer = (recall.manufacturer || "").trim();
+  const title = (recall.title || "").trim();
+
+  // If we have both manufacturer and product name, combine them
+  if (manufacturer && product) {
+    const combined = `${manufacturer} ${product}`;
+    return combined.slice(0, 80);
+  }
+
+  // If we only have product name, use it directly
+  if (product) {
+    return product.slice(0, 80);
+  }
+
+  // Fall back to title, but strip common CPSC recall boilerplate
+  if (title) {
+    const cleaned = title
+      // Remove " Recalled Due to ..." and everything after
+      .replace(/\s+Recalled?\s+Due\s+to.*/i, "")
+      // Remove " Due to Risk of ..." suffix
+      .replace(/\s+Due\s+to\s+Risk.*/i, "")
+      // Remove "Recalls " prefix (e.g. "CPSC Recalls X" -> "X")
+      .replace(/^[^:]+?Recalls?\s+/i, "")
+      .trim();
+    return cleaned.slice(0, 80);
+  }
+
+  return "";
+}
+
 export async function refreshAllProfitAnalysis(thresholdPercent = 10): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  const allRecalls = await db
-    .select({ id: recalls.id, productName: recalls.productName, title: recalls.title, agency: recalls.agency })
+   const allRecalls = await db
+    .select({ id: recalls.id, productName: recalls.productName, title: recalls.title, agency: recalls.agency, manufacturer: recalls.manufacturer })
     .from(recalls)
     .where(eq(recalls.isActive, true));
-
   for (const recall of allRecalls) {
     try {
-      const productQuery = recall.productName || recall.title || "";
+      const productQuery = buildSearchQuery(recall);
       if (!productQuery) continue;
       await fetchAndStorePricingForRecall(recall.id, productQuery, recall.agency as "CPSC" | "NHTSA");
       await calculateProfitForRecall(recall.id, thresholdPercent);
