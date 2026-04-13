@@ -269,7 +269,8 @@ export async function refreshAllProfitAnalysis(thresholdPercent = 10): Promise<v
       if (!productQuery) continue;
       await fetchAndStorePricingForRecall(recall.id, productQuery, recall.agency as "CPSC" | "NHTSA");
       await calculateProfitForRecall(recall.id, thresholdPercent);
-      await new Promise((r) => setTimeout(r, 500));
+      // 2 second delay between recalls to respect eBay API rate limits
+      await new Promise((r) => setTimeout(r, 2000));
     } catch (err) {
       console.error(`[ProfitEngine] Failed for recall ${recall.id}:`, err);
     }

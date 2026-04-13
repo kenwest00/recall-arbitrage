@@ -152,15 +152,26 @@ export async function findCompletedItems(
     }
 
     const url = `${EBAY_FINDING_URL}?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: {
-        "X-EBAY-SOA-SECURITY-TOKEN": token,
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!res.ok) {
+    // Finding API uses App ID in URL only — no OAuth token header needed
+    // Retry up to 3 times with exponential backoff on rate limit / server errors
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+      res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      if (res.ok || res.status === 404) break;
+      // On rate limit or server error, wait and retry
+      const body = await res.text();
+      if (body.includes('10001') || body.includes('RateLimiter')) {
+        console.warn(`[eBay Finding API] Rate limited on attempt ${attempt + 1}, backing off...`);
+        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+        continue;
+      }
       throw new Error(`Finding API HTTP ${res.status}`);
+    }
+    if (!res || !res.ok) {
+      throw new Error(`Finding API failed after retries: HTTP ${res?.status}`);
     }
 
     const data = await res.json() as FindingApiResponse;
