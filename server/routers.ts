@@ -16,6 +16,7 @@ import {
 import {
   calculateProfitForRecall,
   fetchAndStorePricingForRecall,
+  refreshAllProfitAnalysis,
 } from "./services/profitEngine";
 import { createReport } from "./services/reportGenerator";
 import {
@@ -195,11 +196,20 @@ const syncRouter = router({
     .mutation(async ({ input }) => {
       if (input.agency === "CPSC") {
         const result = await ingestCpscRecalls();
+        // Run pricing + profit analysis after ingestion
+        refreshAllProfitAnalysis().catch((err) =>
+          console.error("[triggerSync] Profit analysis failed:", err)
+        );
         return { success: true, result };
       } else if (input.agency === "NHTSA") {
         const result = await ingestNhtsaRecalls();
+        // Run pricing + profit analysis after ingestion
+        refreshAllProfitAnalysis().catch((err) =>
+          console.error("[triggerSync] Profit analysis failed:", err)
+        );
         return { success: true, result };
       } else {
+        // triggerImmediateSync now runs the full pipeline (recalls + pricing + profit)
         await triggerImmediateSync();
         return { success: true, result: { message: "Full sync triggered" } };
       }

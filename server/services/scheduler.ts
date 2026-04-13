@@ -3,9 +3,15 @@
  * Manages the periodic recall data refresh using a simple interval-based approach.
  * The interval is configurable per user (stored in user_settings).
  * The global default is 24 hours.
+ *
+ * Full pipeline on each run:
+ *   1. Ingest recalls from CPSC + NHTSA
+ *   2. Fetch market pricing for each active recall (eBay, Amazon, Facebook, Craigslist / auto parts)
+ *   3. Calculate profit analysis for each recall
  */
 
 import { ingestAllRecalls } from "./recallIngestion";
+import { refreshAllProfitAnalysis } from "./profitEngine";
 
 interface SchedulerState {
   timer: ReturnType<typeof setInterval> | null;
@@ -35,13 +41,19 @@ async function runIngestion(): Promise<void> {
 
   state.isRunning = true;
   state.lastRunAt = new Date();
-  console.log(`[Scheduler] Starting recall ingestion at ${state.lastRunAt.toISOString()}`);
+  console.log(`[Scheduler] Starting full sync pipeline at ${state.lastRunAt.toISOString()}`);
 
   try {
+    // Step 1: Ingest recalls from CPSC + NHTSA
     const result = await ingestAllRecalls();
-    console.log("[Scheduler] Ingestion complete:", result);
+    console.log("[Scheduler] Recall ingestion complete:", result);
+
+    // Step 2 + 3: Fetch market pricing and calculate profit analysis for all active recalls
+    console.log("[Scheduler] Starting market pricing and profit analysis...");
+    await refreshAllProfitAnalysis();
+    console.log("[Scheduler] Profit analysis complete.");
   } catch (err) {
-    console.error("[Scheduler] Ingestion failed:", err);
+    console.error("[Scheduler] Full sync pipeline failed:", err);
   } finally {
     state.isRunning = false;
     state.nextRunAt = computeNextRun(state.intervalHours);
@@ -80,7 +92,8 @@ export function stopScheduler(): void {
 }
 
 /**
- * Trigger an immediate ingestion run (outside the schedule).
+ * Trigger an immediate full sync run (outside the schedule).
+ * Runs: recall ingestion → market pricing → profit analysis
  */
 export async function triggerImmediateSync(): Promise<void> {
   await runIngestion();
