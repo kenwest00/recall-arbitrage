@@ -1,16 +1,17 @@
 /**
  * Market Pricing Service
- * Fetches used market prices from eBay (official API), Amazon, and Facebook Marketplace
- * for recalled CPSC consumer products.
+ * Fetches used market prices from eBay (official API), Amazon, Facebook Marketplace,
+ * and Craigslist for recalled CPSC consumer products.
  *
  * eBay now uses the official Finding API + Browse API via ebayApiClient.ts.
- * Amazon and Facebook Marketplace use best-effort HTML parsing (no paid API required).
+ * Amazon, Facebook Marketplace, and Craigslist use best-effort HTML parsing (no paid API required).
  */
 
 import { fetchEbayPrices as fetchEbayApiPrices } from "./ebayApiClient";
+import { fetchCraigslistPrices, type CraigslistResult } from "./craigslistClient";
 
 export interface PricingResult {
-  platform: "ebay" | "amazon" | "facebook";
+  platform: "ebay" | "amazon" | "facebook" | "craigslist";
   listings: Array<{
     title: string;
     price: number;
@@ -198,6 +199,23 @@ function parseFacebookListings(html: string, query: string): PricingResult["list
   return listings;
 }
 
+// ─── Craigslist ───────────────────────────────────────────────────────────────
+
+export async function fetchCraigslistPricesWrapped(query: string): Promise<PricingResult> {
+  try {
+    const result: CraigslistResult = await fetchCraigslistPrices(query);
+    return {
+      platform: "craigslist",
+      listings: result.listings,
+      avgPrice: result.avgPrice,
+      count: result.count,
+      error: result.error,
+    };
+  } catch (err) {
+    return { platform: "craigslist", listings: [], avgPrice: null, count: 0, error: String(err) };
+  }
+}
+
 // ─── MSRP Lookup ─────────────────────────────────────────────────────────────
 
 export interface MsrpResult {
@@ -294,12 +312,14 @@ export async function fetchAllPricesForProduct(productName: string): Promise<{
   ebay: PricingResult;
   amazon: PricingResult;
   facebook: PricingResult;
+  craigslist: PricingResult;
   msrp: MsrpResult[];
 }> {
-  const [ebay, amazon, facebook, msrp] = await Promise.allSettled([
+  const [ebay, amazon, facebook, craigslist, msrp] = await Promise.allSettled([
     fetchEbayPrices(productName),
     fetchAmazonPrices(productName),
     fetchFacebookPrices(productName),
+    fetchCraigslistPricesWrapped(productName),
     fetchMsrpPrice(productName),
   ]);
 
@@ -307,6 +327,7 @@ export async function fetchAllPricesForProduct(productName: string): Promise<{
     ebay: ebay.status === "fulfilled" ? ebay.value : { platform: "ebay", listings: [], avgPrice: null, count: 0, error: "Failed" },
     amazon: amazon.status === "fulfilled" ? amazon.value : { platform: "amazon", listings: [], avgPrice: null, count: 0, error: "Failed" },
     facebook: facebook.status === "fulfilled" ? facebook.value : { platform: "facebook", listings: [], avgPrice: null, count: 0, error: "Failed" },
+    craigslist: craigslist.status === "fulfilled" ? craigslist.value : { platform: "craigslist", listings: [], avgPrice: null, count: 0, error: "Failed" },
     msrp: msrp.status === "fulfilled" ? msrp.value : [],
   };
 }

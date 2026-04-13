@@ -1,7 +1,7 @@
 /**
  * Profit Calculation Engine
  * Routes NHTSA recalls to auto parts platforms (eBay Motors, RockAuto, Car-Part, LKQ)
- * and CPSC recalls to general consumer market platforms (eBay, Amazon, Facebook).
+ * and CPSC recalls to general consumer market platforms (eBay, Amazon, Facebook, Craigslist).
  */
 
 import { eq } from "drizzle-orm";
@@ -82,8 +82,8 @@ export async function fetchAndStorePricingForRecall(
       await db.insert(msrpData).values(row);
     }
   } else {
-    // ── General consumer market path ─────────────────────────────────────────
-    const { ebay, amazon, facebook, msrp } = await fetchAllPricesForProduct(productName);
+    // ── General consumer market path (CPSC) ──────────────────────────────────
+    const { ebay, amazon, facebook, craigslist, msrp } = await fetchAllPricesForProduct(productName);
 
     for (const listing of ebay.listings.slice(0, 10)) {
       await db.insert(pricingData).values({
@@ -113,6 +113,18 @@ export async function fetchAndStorePricingForRecall(
       await db.insert(pricingData).values({
         recallId,
         platform: "facebook",
+        listingTitle: listing.title,
+        price: String(listing.price),
+        condition: listing.condition,
+        listingUrl: listing.url,
+        quantity: listing.quantity,
+      } as InsertPricingData);
+    }
+
+    for (const listing of craigslist.listings.slice(0, 10)) {
+      await db.insert(pricingData).values({
+        recallId,
+        platform: "craigslist",
         listingTitle: listing.title,
         price: String(listing.price),
         condition: listing.condition,
@@ -155,6 +167,7 @@ export async function calculateProfitForRecall(
   let ebayAvg: number | null = null;
   let amazonAvg: number | null = null;
   let fbAvg: number | null = null;
+  let craigslistAvg: number | null = null;
   let ebayMotorsAvg: number | null = null;
   let carPartAvg: number | null = null;
   let lkqAvg: number | null = null;
@@ -170,9 +183,11 @@ export async function calculateProfitForRecall(
     const ebayPrices = prices.filter((p) => p.platform === "ebay").map((p) => parseFloat(String(p.price)));
     const amazonPrices = prices.filter((p) => p.platform === "amazon").map((p) => parseFloat(String(p.price)));
     const fbPrices = prices.filter((p) => p.platform === "facebook").map((p) => parseFloat(String(p.price)));
+    const craigslistPrices = prices.filter((p) => p.platform === "craigslist").map((p) => parseFloat(String(p.price)));
     ebayAvg = avg(ebayPrices);
     amazonAvg = avg(amazonPrices);
     fbAvg = avg(fbPrices);
+    craigslistAvg = avg(craigslistPrices);
   }
 
   // Blended average: only used-market sources (exclude RockAuto new parts)
@@ -197,16 +212,21 @@ export async function calculateProfitForRecall(
     meetsThreshold = profitMargin >= thresholdPercent;
   }
 
+  // For CPSC: blend craigslist into fbAvg field if no fb data
+  const effectiveFbAvg = isNhtsa
+    ? (lkqAvg !== null ? String(lkqAvg) : null)
+    : (fbAvg !== null ? String(fbAvg) : craigslistAvg !== null ? String(craigslistAvg) : null);
+
   const analysis: InsertProfitAnalysis = {
     recallId,
     avgUsedPrice: blendedAvg !== null ? String(blendedAvg) : null,
     // For CPSC: use standard fields; for NHTSA: repurpose fields for auto parts platforms
     ebayAvgPrice: isNhtsa ? (ebayMotorsAvg !== null ? String(ebayMotorsAvg) : null) : (ebayAvg !== null ? String(ebayAvg) : null),
     amazonAvgPrice: isNhtsa ? (carPartAvg !== null ? String(carPartAvg) : null) : (amazonAvg !== null ? String(amazonAvg) : null),
-    fbAvgPrice: isNhtsa ? (lkqAvg !== null ? String(lkqAvg) : null) : (fbAvg !== null ? String(fbAvg) : null),
+    fbAvgPrice: effectiveFbAvg,
     ebayCount: prices.filter((p) => ["ebay", "ebaymotors"].includes(p.platform)).length,
     amazonCount: prices.filter((p) => ["amazon", "carpart"].includes(p.platform)).length,
-    fbCount: prices.filter((p) => ["facebook", "lkq"].includes(p.platform)).length,
+    fbCount: prices.filter((p) => ["facebook", "lkq", "craigslist"].includes(p.platform)).length,
     totalCount: allUsedPrices.length,
     refundValue: refundValue !== null ? String(refundValue) : null,
     msrpValue: msrpValue !== null ? String(msrpValue) : null,

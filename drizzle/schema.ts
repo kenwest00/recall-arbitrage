@@ -71,7 +71,7 @@ export type InsertRecall = typeof recalls.$inferInsert;
 export const pricingData = mysqlTable("pricing_data", {
   id: int("id").autoincrement().primaryKey(),
   recallId: int("recallId").notNull(),
-  platform: mysqlEnum("platform", ["ebay", "amazon", "facebook", "ebaymotors", "rockauto", "carpart", "lkq"]).notNull(),
+  platform: mysqlEnum("platform", ["ebay", "amazon", "facebook", "craigslist", "ebaymotors", "rockauto", "carpart", "lkq"]).notNull(),
   listingTitle: text("listingTitle"),
   price: decimal("price", { precision: 10, scale: 2 }),
   condition: varchar("condition", { length: 64 }),
