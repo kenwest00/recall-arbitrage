@@ -10,6 +10,7 @@ import {
   LogOut,
   RefreshCw,
   Settings,
+  ShoppingCart,
   TrendingUp,
   User,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import { toast } from "sonner";
 const navItems = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/opportunities", label: "Opportunities", icon: TrendingUp },
+  { href: "/deals", label: "My Deals", icon: ShoppingCart },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -102,18 +104,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               Last: {new Date(syncStatus.data.scheduler.lastRunAt).toLocaleString()}
             </p>
           )}
-          {isAuthenticated && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full h-7 text-xs"
-              onClick={() => triggerSync.mutate({ agency: "ALL" })}
-              disabled={triggerSync.isPending || isRunning}
-            >
-              <RefreshCw className={cn("w-3 h-3 mr-1.5", triggerSync.isPending && "animate-spin")} />
-              Sync Now
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full h-7 text-xs"
+            onClick={() => triggerSync.mutate({ agency: "ALL" })}
+            disabled={triggerSync.isPending || isRunning}
+          >
+            <RefreshCw className={cn("w-3 h-3 mr-1.5", triggerSync.isPending && "animate-spin")} />
+            Sync Now
+          </Button>
         </div>
 
         {/* User */}

@@ -15,10 +15,13 @@ import {
   DollarSign,
   ExternalLink,
   Filter,
+  Flame,
   Package,
   RefreshCw,
   Search,
+  ShoppingCart,
   TrendingUp,
+  Wallet,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
@@ -30,15 +33,20 @@ function StatCard({
   sub,
   icon: Icon,
   accent,
+  onClick,
 }: {
   title: string;
   value: string | number | null;
   sub?: string;
   icon: React.ElementType;
   accent?: string;
+  onClick?: () => void;
 }) {
   return (
-    <Card className="bg-card border-border">
+    <Card
+      className={cn("bg-card border-border", onClick && "cursor-pointer hover:border-primary/40 transition-colors")}
+      onClick={onClick}
+    >
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div>
@@ -54,6 +62,23 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function BuyScoreBadge({ score }: { score: number | null }) {
+  if (score === null || score === 0) return <span className="text-muted-foreground text-xs">—</span>;
+  const color =
+    score >= 70
+      ? "text-emerald-400"
+      : score >= 40
+      ? "text-yellow-400"
+      : "text-orange-400";
+  const showFlame = score >= 70;
+  return (
+    <span className={cn("inline-flex items-center gap-1 font-semibold text-sm", color)}>
+      {showFlame && <Flame className="w-3.5 h-3.5" />}
+      {score}
+    </span>
   );
 }
 
@@ -88,11 +113,12 @@ export default function Dashboard() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [agency, setAgency] = useState<string>("ALL");
-  const [onlyRefund, setOnlyRefund] = useState(true); // Default: show refund-only recalls
+  const [onlyRefund, setOnlyRefund] = useState(true);
   const [onlyOpps, setOnlyOpps] = useState(false);
   const [threshold] = useState(10);
 
   const stats = trpc.analysis.dashboard.useQuery({ profitThreshold: threshold });
+  const dealSummary = trpc.deals.getSummary.useQuery();
 
   const recalls = trpc.recalls.list.useQuery({
     search: search || undefined,
@@ -136,7 +162,7 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Stats */}
+        {/* Stats — top row: recall intelligence */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Refund-Eligible Recalls"
@@ -150,6 +176,7 @@ export default function Dashboard() {
             sub={`≥${threshold}% margin`}
             icon={TrendingUp}
             accent="text-emerald-400"
+            onClick={() => navigate("/opportunities")}
           />
           <StatCard
             title="Avg Profit Margin"
@@ -162,6 +189,41 @@ export default function Dashboard() {
             value={stats.data?.lastSyncAt ? new Date(stats.data.lastSyncAt).toLocaleDateString() : "Never"}
             sub={stats.data?.lastSyncAt ? new Date(stats.data.lastSyncAt).toLocaleTimeString() : "Run a sync to load data"}
             icon={Package}
+          />
+        </div>
+
+        {/* Stats — bottom row: deal tracker summary */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Deals Tracked"
+            value={dealSummary.data?.totalDeals ?? 0}
+            sub="Items purchased"
+            icon={ShoppingCart}
+            onClick={() => navigate("/deals")}
+          />
+          <StatCard
+            title="Capital Deployed"
+            value={dealSummary.data?.totalInvested !== undefined ? `$${dealSummary.data.totalInvested.toFixed(2)}` : "$0.00"}
+            sub="Awaiting refunds"
+            icon={Wallet}
+            accent="text-orange-400"
+            onClick={() => navigate("/deals")}
+          />
+          <StatCard
+            title="Pending Refunds"
+            value={dealSummary.data?.pendingRefunds !== undefined ? `$${dealSummary.data.pendingRefunds.toFixed(2)}` : "$0.00"}
+            sub="Claims submitted"
+            icon={TrendingUp}
+            accent="text-yellow-400"
+            onClick={() => navigate("/deals")}
+          />
+          <StatCard
+            title="Profit Banked"
+            value={dealSummary.data?.profitBanked !== undefined ? `$${dealSummary.data.profitBanked.toFixed(2)}` : "$0.00"}
+            sub="Refunds received"
+            icon={DollarSign}
+            accent="text-emerald-400"
+            onClick={() => navigate("/deals")}
           />
         </div>
 
@@ -267,20 +329,26 @@ export default function Dashboard() {
                       <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground w-28">Refund</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground w-28">Avg Used</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground w-24">Margin</th>
-                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground w-20">Listings</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground w-20">Score</th>
                       <th className="w-10 px-4 py-3"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((row) => {
                       const margin = row.profitMargin ? parseFloat(String(row.profitMargin)) : null;
+                      const buyScore = (row as { buyScore?: number }).buyScore ?? null;
                       const isOpp = margin !== null && margin >= threshold;
+                      const isHot = buyScore !== null && buyScore >= 70;
                       return (
                         <tr
                           key={row.id}
                           className={cn(
                             "border-b border-border/50 hover:bg-muted/20 cursor-pointer transition-colors",
-                            isOpp && "bg-emerald-950/20 border-l-2 border-l-emerald-600"
+                            isHot
+                              ? "bg-emerald-950/30 border-l-2 border-l-emerald-500"
+                              : isOpp
+                              ? "bg-emerald-950/10 border-l-2 border-l-emerald-800"
+                              : ""
                           )}
                           onClick={() => navigate(`/recalls/${row.id}`)}
                         >
@@ -318,8 +386,8 @@ export default function Dashboard() {
                           <td className="px-4 py-3 text-right">
                             <ProfitBadge margin={margin} />
                           </td>
-                          <td className="px-4 py-3 text-right text-xs text-muted-foreground">
-                            {row.totalCount ?? "—"}
+                          <td className="px-4 py-3 text-right">
+                            <BuyScoreBadge score={buyScore} />
                           </td>
                           <td className="px-4 py-3">
                             <ChevronRight className="w-4 h-4 text-muted-foreground" />

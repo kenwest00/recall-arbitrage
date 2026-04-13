@@ -1,6 +1,7 @@
 /**
  * Recall Ingestion Service
  * Orchestrates fetching from CPSC and NHTSA APIs and persisting to the database.
+ * Uses LLM-based refund extraction for more accurate refund value detection.
  */
 
 import { eq } from "drizzle-orm";
@@ -17,10 +18,12 @@ import {
   extractNhtsaRefundValue,
   type NhtsaRecall,
 } from "./nhtsaClient";
+import { extractRefundWithLLM } from "./refundExtractor";
+import { fetchMsrpPrice, type MsrpResult } from "./marketPricing";
 
 // ─── CPSC Ingestion ──────────────────────────────────────────────────────────
 
-function mapCpscRecall(r: CpscRecall): InsertRecall {
+async function mapCpscRecall(r: CpscRecall): Promise<InsertRecall> {
   const product = r.Products?.[0];
   const hazard = r.Hazards?.[0]?.Name || "";
   const remedy = r.Remedies?.map((rem) => rem.Name).join(", ") || "";
@@ -29,11 +32,62 @@ function mapCpscRecall(r: CpscRecall): InsertRecall {
     .filter(Boolean)
     .join("\n\n");
 
-  // isRefundRemedy now accepts the full remedy text string
+  // Step 1: regex-based quick check (fast, no API cost)
   const hasRefund = isRefundRemedy(r.Remedies || []);
-  const { value: refundValue, notes: refundNotes } = hasRefund
+  const { value: regexValue, notes: regexNotes } = hasRefund
     ? extractRefundValue(remedy)
     : { value: null, notes: "" };
+
+  let finalRefundValue: number | null = regexValue;
+  let finalRefundNotes: string = regexNotes || "";
+  let finalRefundExtracted: boolean = hasRefund;
+  let refundCertainty: "explicit" | "msrp" | "estimated" = regexValue !== null ? "explicit" : "estimated";
+
+  // Step 2: LLM extraction — runs for ALL recalls to catch cases regex misses
+  try {
+    const llmResult = await extractRefundWithLLM(remedy, r.Description || "");
+
+    if (llmResult.isReplacementOnly && !llmResult.isFullPurchasePrice && llmResult.refundValue === null) {
+      // Replacement only — no cash refund
+      finalRefundValue = null;
+      finalRefundExtracted = false;
+      finalRefundNotes = llmResult.refundNotes || "Replacement only, no cash refund";
+      refundCertainty = "estimated";
+    } else if (llmResult.refundValue !== null) {
+      // LLM found an explicit dollar amount
+      finalRefundValue = llmResult.refundValue;
+      finalRefundExtracted = true;
+      finalRefundNotes = llmResult.refundNotes || `Explicit refund: $${llmResult.refundValue}`;
+      refundCertainty = "explicit";
+    } else if (llmResult.isFullPurchasePrice) {
+      // Full purchase price refund — try to get MSRP as proxy
+      finalRefundExtracted = true;
+      finalRefundNotes = llmResult.refundNotes || "Full purchase price refund";
+      refundCertainty = "msrp";
+
+      const productName = product?.Name || "";
+      if (productName) {
+        try {
+          const msrpResults: MsrpResult[] = await fetchMsrpPrice(productName);
+          const bestMsrp = msrpResults.find((m) => m.price !== null && m.price > 0);
+          if (bestMsrp && bestMsrp.price) {
+            finalRefundValue = bestMsrp.price;
+            finalRefundNotes = `Full purchase price refund; MSRP proxy: $${bestMsrp.price} from ${bestMsrp.source}`;
+          }
+        } catch {
+          // MSRP fetch failed — leave refundValue null but keep refundExtracted=true
+        }
+      }
+    } else if (hasRefund && regexValue === null) {
+      // Regex detected a refund but couldn't extract amount; LLM also couldn't
+      finalRefundExtracted = true;
+      finalRefundNotes = llmResult.refundNotes || "Refund available, amount not specified";
+      refundCertainty = "estimated";
+    }
+  } catch (err) {
+    console.warn(`[RecallIngestion] LLM extraction failed for ${r.RecallNumber}:`, err);
+    // Fall back to regex result
+  }
 
   return {
     recallNumber: r.RecallNumber || r.RecallID,
@@ -46,9 +100,9 @@ function mapCpscRecall(r: CpscRecall): InsertRecall {
     hazard,
     remedy,
     rawNotice,
-    refundValue: refundValue !== null ? String(refundValue) : null,
-    refundExtracted: hasRefund,
-    refundNotes: refundNotes || null,
+    refundValue: finalRefundValue !== null ? String(finalRefundValue) : null,
+    refundExtracted: finalRefundExtracted,
+    refundNotes: finalRefundNotes || null,
     recallDate: r.RecallDate ? new Date(r.RecallDate) : null,
     recallUrl: r.URL || null,
     imageUrl: r.Images?.[0]?.URL || null,
@@ -147,10 +201,12 @@ export async function ingestCpscRecalls(): Promise<{ inserted: number; updated: 
 
     for (const raw of cpscRecalls) {
       try {
-        const mapped = mapCpscRecall(raw);
+        const mapped = await mapCpscRecall(raw);
         const wasInserted = await upsertRecall(db, mapped);
         if (wasInserted) inserted++;
         else updated++;
+        // Small delay to avoid hammering LLM/MSRP APIs
+        await new Promise((r) => setTimeout(r, 100));
       } catch {
         errors++;
       }

@@ -26,6 +26,9 @@ import {
   updateSchedulerInterval,
 } from "./services/scheduler";
 import { ingestCpscRecalls, ingestNhtsaRecalls } from "./services/recallIngestion";
+import { getDb } from "./db";
+import { dealTracker } from "../drizzle/schema";
+import { eq, desc, sum, count } from "drizzle-orm";
 
 // ─── Recalls Router ───────────────────────────────────────────────────────────
 
@@ -224,7 +227,154 @@ const syncRouter = router({
     }),
 });
 
-// ─── App Router ───────────────────────────────────────────────────────────────
+// ─── Deal Tracker Router ───────────────────────────────────────────────────────────
+
+const dealTrackerRouter = router({
+  getAll: publicProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+    return db.select().from(dealTracker).orderBy(desc(dealTracker.createdAt));
+  }),
+
+  getById: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [deal] = await db.select().from(dealTracker).where(eq(dealTracker.id, input.id)).limit(1);
+      if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found" });
+      return deal;
+    }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        recallId: z.number(),
+        recallNumber: z.string().optional(),
+        productName: z.string().optional(),
+        manufacturer: z.string().optional(),
+        refundValue: z.number().optional(),
+        purchasePrice: z.number(),
+        shippingCost: z.number().default(0),
+        purchasePlatform: z.enum(["ebay", "facebook", "craigslist", "amazon", "other"]).optional(),
+        purchaseUrl: z.string().optional(),
+        purchaseDate: z.string().optional(),
+        notes: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const totalCost = input.purchasePrice + (input.shippingCost ?? 0);
+      const netProfit = input.refundValue ? input.refundValue - totalCost : null;
+      const result = await db.insert(dealTracker).values({
+        recallId: input.recallId,
+        recallNumber: input.recallNumber,
+        productName: input.productName,
+        manufacturer: input.manufacturer,
+        refundValue: input.refundValue !== undefined ? String(input.refundValue) : null,
+        purchasePrice: String(input.purchasePrice),
+        shippingCost: String(input.shippingCost ?? 0),
+        totalCost: String(totalCost),
+        purchasePlatform: input.purchasePlatform,
+        purchaseUrl: input.purchaseUrl,
+        purchaseDate: input.purchaseDate ? new Date(input.purchaseDate) : new Date(),
+        claimStatus: "not_started",
+        netProfit: netProfit !== null ? String(netProfit) : null,
+        notes: input.notes,
+      });
+      const insertId = Number((result as unknown as { insertId: number }).insertId);
+      return { success: true, id: insertId };
+    }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        purchasePrice: z.number().optional(),
+        shippingCost: z.number().optional(),
+        purchasePlatform: z.enum(["ebay", "facebook", "craigslist", "amazon", "other"]).optional(),
+        purchaseUrl: z.string().optional(),
+        purchaseDate: z.string().optional(),
+        claimStatus: z.enum(["not_started", "submitted", "pending", "approved", "received", "denied"]).optional(),
+        claimSubmittedDate: z.string().optional(),
+        refundReceivedDate: z.string().optional(),
+        refundReceivedAmount: z.number().optional(),
+        notes: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [existing] = await db.select().from(dealTracker).where(eq(dealTracker.id, input.id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const purchasePrice = input.purchasePrice !== undefined ? input.purchasePrice : parseFloat(String(existing.purchasePrice ?? 0));
+      const shippingCost = input.shippingCost !== undefined ? input.shippingCost : parseFloat(String(existing.shippingCost ?? 0));
+      const totalCost = purchasePrice + shippingCost;
+      const refundValue = existing.refundValue ? parseFloat(String(existing.refundValue)) : null;
+      const refundReceived = input.refundReceivedAmount !== undefined ? input.refundReceivedAmount : (existing.refundReceivedAmount ? parseFloat(String(existing.refundReceivedAmount)) : null);
+      const netProfit = refundReceived !== null ? refundReceived - totalCost : (refundValue !== null ? refundValue - totalCost : null);
+
+      const updateData: Record<string, unknown> = {
+        totalCost: String(totalCost),
+        netProfit: netProfit !== null ? String(netProfit) : null,
+      };
+      if (input.purchasePrice !== undefined) updateData.purchasePrice = String(input.purchasePrice);
+      if (input.shippingCost !== undefined) updateData.shippingCost = String(input.shippingCost);
+      if (input.purchasePlatform !== undefined) updateData.purchasePlatform = input.purchasePlatform;
+      if (input.purchaseUrl !== undefined) updateData.purchaseUrl = input.purchaseUrl;
+      if (input.purchaseDate !== undefined) updateData.purchaseDate = new Date(input.purchaseDate);
+      if (input.claimStatus !== undefined) updateData.claimStatus = input.claimStatus;
+      if (input.claimSubmittedDate !== undefined) updateData.claimSubmittedDate = new Date(input.claimSubmittedDate);
+      if (input.refundReceivedDate !== undefined) updateData.refundReceivedDate = new Date(input.refundReceivedDate);
+      if (input.refundReceivedAmount !== undefined) updateData.refundReceivedAmount = String(input.refundReceivedAmount);
+      if (input.notes !== undefined) updateData.notes = input.notes;
+
+      await db.update(dealTracker).set(updateData).where(eq(dealTracker.id, input.id));
+      return { success: true };
+    }),
+
+  delete: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(dealTracker).where(eq(dealTracker.id, input.id));
+      return { success: true };
+    }),
+
+  getSummary: publicProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const deals = await db.select().from(dealTracker);
+    const totalInvested = deals.reduce((acc, d) => acc + parseFloat(String(d.totalCost ?? 0)), 0);
+    const pendingRefunds = deals
+      .filter((d) => ["submitted", "pending", "approved"].includes(d.claimStatus ?? ""))
+      .reduce((acc, d) => acc + parseFloat(String(d.refundValue ?? 0)), 0);
+    const profitBanked = deals
+      .filter((d) => d.claimStatus === "received")
+      .reduce((acc, d) => acc + parseFloat(String(d.netProfit ?? 0)), 0);
+    const avgMargin = deals.length > 0
+      ? deals
+          .filter((d) => d.refundValue && d.totalCost)
+          .reduce((acc, d) => {
+            const rv = parseFloat(String(d.refundValue ?? 0));
+            const tc = parseFloat(String(d.totalCost ?? 0));
+            return acc + (rv > 0 ? ((rv - tc) / rv) * 100 : 0);
+          }, 0) / Math.max(1, deals.filter((d) => d.refundValue && d.totalCost).length)
+      : 0;
+    return {
+      totalDeals: deals.length,
+      totalInvested: Math.round(totalInvested * 100) / 100,
+      pendingRefunds: Math.round(pendingRefunds * 100) / 100,
+      profitBanked: Math.round(profitBanked * 100) / 100,
+      avgMargin: Math.round(avgMargin * 10) / 10,
+    };
+  }),
+});
+
+// ─── App Router ──────────────────────────────────────────────────────────────────
 
 export const appRouter = router({
   system: systemRouter,
@@ -241,6 +391,7 @@ export const appRouter = router({
   settings: settingsRouter,
   reports: reportsRouter,
   sync: syncRouter,
+  deals: dealTrackerRouter,
 });
 
 export type AppRouter = typeof appRouter;

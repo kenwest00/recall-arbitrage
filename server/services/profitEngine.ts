@@ -156,7 +156,7 @@ export async function calculateProfitForRecall(
   const db = await getDb();
   if (!db) return null;
 
-  const [recall] = await db.select().from(recalls).where(eq(recalls.id, recallId)).limit(1);
+  const [recall] = await db.select({ id: recalls.id, refundValue: recalls.refundValue, agency: recalls.agency, refundNotes: recalls.refundNotes }).from(recalls).where(eq(recalls.id, recallId)).limit(1);
   if (!recall) return null;
 
   const refundValue = recall.refundValue ? parseFloat(String(recall.refundValue)) : null;
@@ -212,6 +212,32 @@ export async function calculateProfitForRecall(
     meetsThreshold = profitMargin >= thresholdPercent;
   }
 
+  // ─── Buy Score (0-100) ──────────────────────────────────────────────────────
+  // Composite score: margin (40pts) + listing count (20pts) + refund certainty (20pts) + profit amount (20pts)
+  let buyScore = 0;
+  if (profitMargin !== null && profitMargin > 0) {
+    // Margin component: 0-40 pts (40% margin = full 40 pts)
+    buyScore += Math.min(40, Math.round((profitMargin / 40) * 40));
+  }
+  const totalListings = allUsedPrices.length;
+  if (totalListings > 0) {
+    // Listing count component: 0-20 pts (10+ listings = full 20 pts)
+    buyScore += Math.min(20, Math.round((totalListings / 10) * 20));
+  }
+  if (refundValue !== null) {
+    // Refund certainty: explicit dollar = 20pts, msrp proxy = 10pts, estimated = 0pts
+    const notes = recall.refundNotes || "";
+    if (notes.includes("Explicit") || notes.includes("explicit")) {
+      buyScore += 20;
+    } else if (notes.includes("MSRP proxy") || notes.includes("Full purchase price")) {
+      buyScore += 10;
+    }
+  }
+  if (profitAmount !== null && profitAmount > 0) {
+    // Profit amount component: 0-20 pts ($20+ profit = full 20 pts)
+    buyScore += Math.min(20, Math.round((profitAmount / 20) * 20));
+  }
+
   // For CPSC: blend craigslist into fbAvg field if no fb data
   const effectiveFbAvg = isNhtsa
     ? (lkqAvg !== null ? String(lkqAvg) : null)
@@ -233,6 +259,7 @@ export async function calculateProfitForRecall(
     profitMargin: profitMargin !== null ? String(profitMargin) : null,
     profitAmount: profitAmount !== null ? String(profitAmount) : null,
     meetsThreshold,
+    buyScore,
     calculatedAt: new Date(),
   };
 

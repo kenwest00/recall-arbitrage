@@ -114,6 +114,8 @@ export const profitAnalysis = mysqlTable("profit_analysis", {
   profitMargin: decimal("profitMargin", { precision: 8, scale: 4 }),
   profitAmount: decimal("profitAmount", { precision: 10, scale: 2 }),
   meetsThreshold: boolean("meetsThreshold").default(false),
+  buyScore: int("buyScore").default(0),
+  refundCertainty: mysqlEnum("refundCertainty", ["explicit", "msrp", "estimated"]).default("estimated"),
   calculatedAt: timestamp("calculatedAt").defaultNow().notNull(),
 });
 
@@ -133,6 +135,33 @@ export const syncLog = mysqlTable("sync_log", {
 
 export type SyncLog = typeof syncLog.$inferSelect;
 export type InsertSyncLog = typeof syncLog.$inferInsert;
+
+// ─── Deal Tracker ────────────────────────────────────────────────────────────
+export const dealTracker = mysqlTable("deal_tracker", {
+  id: int("id").autoincrement().primaryKey(),
+  recallId: int("recallId").notNull(),
+  recallNumber: varchar("recallNumber", { length: 64 }),
+  productName: text("productName"),
+  manufacturer: text("manufacturer"),
+  refundValue: decimal("refundValue", { precision: 10, scale: 2 }),
+  purchasePrice: decimal("purchasePrice", { precision: 10, scale: 2 }),
+  shippingCost: decimal("shippingCost", { precision: 10, scale: 2 }).default("0.00"),
+  totalCost: decimal("totalCost", { precision: 10, scale: 2 }),
+  purchasePlatform: mysqlEnum("purchasePlatform", ["ebay", "facebook", "craigslist", "amazon", "other"]),
+  purchaseUrl: text("purchaseUrl"),
+  purchaseDate: timestamp("purchaseDate"),
+  claimSubmittedDate: timestamp("claimSubmittedDate"),
+  claimStatus: mysqlEnum("claimStatus", ["not_started", "submitted", "pending", "approved", "received", "denied"]).default("not_started"),
+  refundReceivedDate: timestamp("refundReceivedDate"),
+  refundReceivedAmount: decimal("refundReceivedAmount", { precision: 10, scale: 2 }),
+  netProfit: decimal("netProfit", { precision: 10, scale: 2 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DealTracker = typeof dealTracker.$inferSelect;
+export type InsertDealTracker = typeof dealTracker.$inferInsert;
 
 // ─── Reports ──────────────────────────────────────────────────────────────────
 export const reports = mysqlTable("reports", {

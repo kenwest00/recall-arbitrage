@@ -2,6 +2,9 @@ import AppLayout from "@/components/AppLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
@@ -10,11 +13,15 @@ import {
   ArrowLeft,
   Car,
   ExternalLink,
+  Flame,
   Package,
+  Plus,
   RefreshCw,
   ShoppingCart,
   TrendingUp,
+  X,
 } from "lucide-react";
+import { useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 
@@ -51,9 +58,171 @@ function PlatformPriceCard({
   );
 }
 
+function TrackDealModal({
+  recall,
+  analysis,
+  onClose,
+}: {
+  recall: { id: number; recallNumber?: string | null; productName?: string | null; manufacturer?: string | null; refundValue?: string | null };
+  analysis: { avgUsedPrice?: string | null } | null;
+  onClose: () => void;
+}) {
+  const [purchasePrice, setPurchasePrice] = useState(
+    analysis?.avgUsedPrice ? parseFloat(String(analysis.avgUsedPrice)).toFixed(2) : ""
+  );
+  const [shippingCost, setShippingCost] = useState("0");
+  const [platform, setPlatform] = useState<string>("ebay");
+  const [purchaseUrl, setPurchaseUrl] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const createDeal = trpc.deals.create.useMutation({
+    onSuccess: () => {
+      toast.success("Deal tracked! View it in My Deals.");
+      onClose();
+    },
+    onError: (e) => toast.error(`Failed to track deal: ${e.message}`),
+  });
+
+  const refundValue = recall.refundValue ? parseFloat(String(recall.refundValue)) : undefined;
+  const totalCost = (parseFloat(purchasePrice) || 0) + (parseFloat(shippingCost) || 0);
+  const estProfit = refundValue !== undefined ? refundValue - totalCost : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-foreground">Track This Deal</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="bg-muted/40 rounded-lg p-3 text-sm">
+            <p className="font-medium text-foreground truncate">{recall.productName}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">#{recall.recallNumber}</p>
+            {refundValue && (
+              <p className="text-xs text-emerald-400 mt-1">Refund value: ${refundValue.toFixed(2)}</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Purchase Price ($)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={purchasePrice}
+                onChange={(e) => setPurchasePrice(e.target.value)}
+                placeholder="0.00"
+                className="h-8 text-sm bg-muted border-border"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Shipping Cost ($)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={shippingCost}
+                onChange={(e) => setShippingCost(e.target.value)}
+                placeholder="0.00"
+                className="h-8 text-sm bg-muted border-border"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Platform</Label>
+            <Select value={platform} onValueChange={setPlatform}>
+              <SelectTrigger className="h-8 text-sm bg-muted border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ebay">eBay</SelectItem>
+                <SelectItem value="facebook">Facebook Marketplace</SelectItem>
+                <SelectItem value="craigslist">Craigslist</SelectItem>
+                <SelectItem value="amazon">Amazon</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Listing URL (optional)</Label>
+            <Input
+              value={purchaseUrl}
+              onChange={(e) => setPurchaseUrl(e.target.value)}
+              placeholder="https://..."
+              className="h-8 text-sm bg-muted border-border"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</Label>
+            <Input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Claim reference, contact info..."
+              className="h-8 text-sm bg-muted border-border"
+            />
+          </div>
+
+          {estProfit !== null && (
+            <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-3 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground text-xs">Total Cost</span>
+                <span className="text-foreground">${totalCost.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center mt-1">
+                <span className="text-muted-foreground text-xs">Refund Value</span>
+                <span className="text-emerald-400">${refundValue!.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center mt-1 pt-1 border-t border-emerald-800/30">
+                <span className="text-xs font-medium text-foreground">Est. Profit</span>
+                <span className={cn("font-bold", estProfit >= 0 ? "text-emerald-400" : "text-red-400")}>
+                  ${estProfit.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" size="sm" className="flex-1 h-9" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1 h-9"
+              disabled={!purchasePrice || createDeal.isPending}
+              onClick={() =>
+                createDeal.mutate({
+                  recallId: recall.id,
+                  recallNumber: recall.recallNumber ?? undefined,
+                  productName: recall.productName ?? undefined,
+                  manufacturer: recall.manufacturer ?? undefined,
+                  refundValue,
+                  purchasePrice: parseFloat(purchasePrice),
+                  shippingCost: parseFloat(shippingCost) || 0,
+                  purchasePlatform: platform as "ebay" | "facebook" | "craigslist" | "amazon" | "other",
+                  purchaseUrl: purchaseUrl || undefined,
+                  notes: notes || undefined,
+                })
+              }
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              {createDeal.isPending ? "Saving..." : "Track Deal"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RecallDetail() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
+  const [showTrackModal, setShowTrackModal] = useState(false);
   const recallId = parseInt(id || "0");
 
   const detail = trpc.recalls.getById.useQuery({ id: recallId }, { enabled: !!recallId });
@@ -128,7 +297,7 @@ export default function RecallDetail() {
     ? ["ebaymotors", "carpart", "lkq"]
     : ["ebay", "amazon", "facebook"];
 
-  return (
+  const content = (
     <AppLayout>
       <div className="p-6 space-y-6 max-w-5xl">
         {/* Back + header */}
@@ -188,6 +357,14 @@ export default function RecallDetail() {
               >
                 <RefreshCw className={cn("w-3 h-3 mr-1.5", refreshPricing.isPending && "animate-spin")} />
                 Refresh Prices
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white"
+                onClick={() => setShowTrackModal(true)}
+              >
+                <Plus className="w-3 h-3 mr-1.5" />
+                Track This Deal
               </Button>
             </div>
           </div>
@@ -406,5 +583,18 @@ export default function RecallDetail() {
         </Card>
       </div>
     </AppLayout>
+  );
+
+  return (
+    <>
+      {content}
+      {showTrackModal && (
+        <TrackDealModal
+          recall={recall}
+          analysis={analysis}
+          onClose={() => setShowTrackModal(false)}
+        />
+      )}
+    </>
   );
 }

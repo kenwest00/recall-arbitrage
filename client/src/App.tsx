@@ -9,6 +9,7 @@ import RecallDetail from "./pages/RecallDetail";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Opportunities from "./pages/Opportunities";
+import MyDeals from "./pages/MyDeals";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/opportunities" component={Opportunities} />
       <Route path="/recalls/:id" component={RecallDetail} />
       <Route path="/reports" component={Reports} />
+      <Route path="/deals" component={MyDeals} />
       <Route path="/settings" component={Settings} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
