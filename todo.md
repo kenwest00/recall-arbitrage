@@ -109,3 +109,16 @@
 - [x] Fix database insert logic for recalls table
 - [x] Fix sync trigger to actually persist data
 - [x] Verify recalls appear in dashboard after sync
+
+## Make App Fully Public (No Login Required)
+- [ ] Remove auth guards from all tRPC procedures (use publicProcedure everywhere)
+- [ ] Remove login redirect from all frontend pages
+- [ ] Remove auth-gated navigation items from sidebar
+- [ ] Settings page: save settings to localStorage instead of user account
+- [ ] Keep auth system intact but make it optional (admin-only use)
+
+## Fix Pricing Pipeline
+- [ ] Switch eBay to production credentials
+- [ ] Replace Amazon HTML scraper with reliable alternative
+- [ ] Replace Facebook Marketplace with Craigslist (no login required)
+- [ ] Verify pricing data writes to DB and displays in UI
